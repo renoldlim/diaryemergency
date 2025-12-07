@@ -4,6 +4,7 @@ import re
 from urllib.parse import quote
 from datetime import datetime
 from zoneinfo import ZoneInfo
+import pydeck as pdk
 
 # === CONFIG: Google Sheet ===
 SHEET_ID = "1KeLHH2u_BmPsvaPMX2oxw0cbeHLV8CdMiphHtFvOfTY"
@@ -413,12 +414,60 @@ def main():
     with col3:
         st.metric("Lokasi Terfilter Saat Ini", len(filtered))
 
-    # === MAP VIEW ===
+    # Kalau setelah semua filter hasilnya kosong → berhenti sebelum peta & tabel
+    if filtered.empty:
+        st.info("Tidak ada lokasi yang cocok dengan filter. Silakan atur ulang filter di sebelah kiri.")
+        return
+
+    # === MAP VIEW (pydeck dengan tooltip) ===
     st.markdown("### 🗺️ Peta Lokasi Terfilter")
+
     if "lat" in filtered.columns and "lon" in filtered.columns:
-        map_data = filtered[["lat", "lon"]].dropna()
+        map_data = filtered.copy()
+        map_data = map_data.dropna(subset=["lat", "lon"])
+
         if not map_data.empty:
-            st.map(map_data, latitude="lat", longitude="lon", size=60)
+            # Siapkan kolom untuk tooltip
+            map_data["Provinsi_display"] = map_data["Provinsi"].astype(str)
+            map_data["Kabupaten_display"] = map_data["Kabupaten"].astype(str)
+            korlap_name_col = "Nama Relawan Koordinator Lapangan"
+            map_data["Korlap_display"] = map_data.get(korlap_name_col, "").astype(str)
+            if wa_korlap_col:
+                map_data["WA_Korlap_display"] = map_data[wa_korlap_col].astype(str)
+            else:
+                map_data["WA_Korlap_display"] = ""
+
+            tooltip = {
+                "html": "<b>{Provinsi_display}</b> – {Kabupaten_display}<br/>"
+                        "Korlap: {Korlap_display}<br/>"
+                        "WA: {WA_Korlap_display}",
+                "style": {
+                    "backgroundColor": "white",
+                    "color": "black",
+                },
+            }
+
+            layer = pdk.Layer(
+                "ScatterplotLayer",
+                data=map_data,
+                get_position="[lon, lat]",
+                get_radius=4000,
+                get_fill_color=[255, 0, 0, 160],
+                pickable=True,
+            )
+
+            view_state = pdk.ViewState(
+                latitude=map_data["lat"].mean(),
+                longitude=map_data["lon"].mean(),
+                zoom=6,
+            )
+
+            deck = pdk.Deck(
+                layers=[layer],
+                initial_view_state=view_state,
+                tooltip=tooltip,
+            )
+            st.pydeck_chart(deck)
         else:
             st.caption("Tidak ada koordinat lat/long yang bisa ditampilkan.")
     else:
@@ -426,10 +475,6 @@ def main():
 
     # === TABLE VIEW ===
     st.markdown("### 📍 Daftar Lokasi")
-
-    if filtered.empty:
-        st.info("Tidak ada lokasi yang cocok dengan filter.")
-        return
 
     show_cols = [
         "No",
@@ -451,7 +496,10 @@ def main():
         height=380,
     )
 
-    # === OPSI PILIH LOKASI (untuk WA) ===
+    # === MULTI-SELECT UNTUK WA GABUNGAN ===
+    st.markdown("---")
+    st.markdown("### ✅ Pilih beberapa lokasi untuk update WhatsApp gabungan")
+
     # Build label list
     options = []
     for idx, row in filtered.iterrows():
@@ -469,59 +517,6 @@ def main():
 
     labels = [o[0] for o in options]
     label_to_idx = {lbl: idx for lbl, idx in options}
-
-    st.markdown("---")
-    st.markdown("### 📲 Detail Lokasi & Kirim ke WhatsApp (single)")
-
-    selected_label = st.selectbox("Pilih satu lokasi", labels)
-    selected_idx = label_to_idx[selected_label]
-    selected_row = filtered.loc[selected_idx]
-    last_update = selected_row.get("Last Update", "")
-
-    body_single, wa_link_single = build_whatsapp_message(
-        selected_row, wa_pusat_col, wa_korlap_col, last_update, include_footer=True
-    )
-
-    cols_detail = st.columns(2)
-    with cols_detail[0]:
-        st.write("**Provinsi**:", selected_row.get("Provinsi", ""))
-        st.write("**Kabupaten**:", selected_row.get("Kabupaten", ""))
-        st.write("**Posko / Lokasi**:")
-        st.write(
-            selected_row.get(
-                "Posko & Penjelasan Jumlah Orang, Berdasarkan Jenis Kelamin dan Usia",
-                "",
-            )
-        )
-    with cols_detail[1]:
-        st.write("**PIC Lapangan**:", selected_row.get("Nama Relawan Koordinator Lapangan", ""))
-        if wa_korlap_col:
-            st.write("**No WA Lapangan**:", selected_row.get(wa_korlap_col, ""))
-        st.write(
-            "**PIC Pusat**:",
-            selected_row.get("Nama Relawan Koordinator Pusat - Posisi Standby", ""),
-        )
-        if wa_pusat_col:
-            st.write("**No WA Pusat**:", selected_row.get(wa_pusat_col, ""))
-        if selected_row.get("Link Google Map", ""):
-            st.write("**Link GMaps**:", selected_row.get("Link Google Map", ""))
-        if selected_row.get("Link Foto / Sosmed / Google Drive", ""):
-            st.write(
-                "**Link Dokumentasi**:",
-                selected_row.get("Link Foto / Sosmed / Google Drive", ""),
-            )
-
-    st.markdown("#### Pesan WhatsApp (single, bisa di-copy)")
-    st.text_area("Body WA (single)", value=body_single, height=260, key="wa_single_body")
-
-    st.markdown(
-        f"[🔗 Buka WhatsApp dengan pesan ini (single)]({wa_link_single})",
-        help="Klik untuk membuka WhatsApp Web / aplikasi dengan pesan yang sudah terisi.",
-    )
-
-    # === MULTI-SELECT UNTUK WA GABUNGAN ===
-    st.markdown("---")
-    st.markdown("### ✅ Pilih beberapa lokasi untuk update WhatsApp gabungan")
 
     multi_selected_labels = st.multiselect(
         "Pilih beberapa lokasi",
