@@ -41,7 +41,7 @@ def clean_region_name(val):
     s = str(val).strip()
     if not s:
         return ""
-    s = re.sub(r"\s+", " ", s)  # rapikan spasi
+    s = re.sub(r"\s+", " ", s)
     low = s.lower()
     special = {
         "dki jakarta": "DKI Jakarta",
@@ -308,7 +308,7 @@ def main():
     else:
         df["Last Update"] = ""
 
-    # Siap dibantu dipertahankan hanya sebagai logika internal (tidak ditampilkan)
+    # logika internal (tidak ditampilkan)
     def is_ready(row):
         has_needs = bool(str(row.get("List Kebutuhan Mendesak", "")).strip())
         has_kab = bool(str(row.get("Kabupaten", "")).strip())
@@ -384,7 +384,7 @@ def main():
 
         filtered = filtered[filtered.apply(matches, axis=1)]
 
-    # === SUMMARY METRICS (disederhanakan) ===
+    # === SUMMARY METRICS (simple) ===
     col1, col2 = st.columns(2)
     with col1:
         st.metric("Total Lokasi (semua data)", len(df))
@@ -394,6 +394,21 @@ def main():
     if filtered.empty:
         st.info("Tidak ada lokasi yang cocok dengan filter. Silakan atur ulang filter di sebelah kiri.")
         return
+
+    # === UNIQUE PIC PUSAT ===
+    pusat_col = "Nama Relawan Koordinator Pusat - Posisi Standby"
+    if pusat_col in filtered.columns:
+        names = (
+            filtered[pusat_col]
+            .dropna()
+            .astype(str)
+            .map(str.strip)
+        )
+        unique_names = sorted({n for n in names if n and n.lower() != "nan"})
+        if unique_names:
+            st.markdown("### 👥 PIC Pusat dalam filter ini")
+            for n in unique_names:
+                st.markdown(f"- {n}")
 
     # === MAP VIEW ===
     st.markdown("### 🗺️ Peta Lokasi Terfilter")
@@ -444,20 +459,15 @@ def main():
     else:
         st.caption("Kolom koordinat (lat/long) belum tersedia di data.")
 
-    # === TABLE VIEW + PILIH LOKASI ===
+    # === TABLE VIEW (read-only) ===
     st.markdown("### 📌 Daftar Lokasi")
-
-    # jaga session_state selected_indices agar hanya berisi index yang masih ada di filtered
-    selected_indices_state = st.session_state.get("selected_indices", [])
-    selected_indices_state = [i for i in selected_indices_state if i in filtered.index]
-    st.session_state["selected_indices"] = selected_indices_state
 
     table_df = filtered.copy()
     table_df["Last Update (ringkas)"] = table_df["Last Update"].astype(str).apply(
         lambda x: x if len(x) <= 25 else x[:22] + "..."
     )
 
-    show_cols_base = [
+    show_cols = [
         "No",
         "Provinsi",
         "Kabupaten",
@@ -467,55 +477,51 @@ def main():
         "Nama Relawan Koordinator Lapangan",
         "Last Update (ringkas)",
     ]
-    show_cols = [c for c in show_cols_base if c in table_df.columns]
+    show_cols = [c for c in show_cols if c in table_df.columns]
 
-    table_df["Pilih"] = table_df.index.isin(st.session_state["selected_indices"])
-    display_cols = ["Pilih"] + show_cols
-
-    edited = st.data_editor(
-        table_df[display_cols],
-        key="table_editor",
+    st.dataframe(
+        table_df[show_cols],
         use_container_width=True,
         hide_index=True,
         height=360,
-        column_config={
-            "Pilih": st.column_config.CheckboxColumn("Pilih"),
-        },
     )
-
-    new_selected_indices = list(edited.index[edited["Pilih"] == True])
-    st.session_state["selected_indices"] = new_selected_indices
-
     st.caption(
-        "Centang kolom **Pilih** pada baris yang ingin dimasukkan ke pesan WhatsApp gabungan di bawah."
+        "Tabel hanya untuk lihat data cepat. Gunakan pilihan di bawah untuk membuat pesan WhatsApp gabungan."
     )
 
-    # === WHATSAPP GABUNGAN ===
+    # === WHATSAPP GABUNGAN (multiselect) ===
     st.markdown("---")
-    st.markdown("### ✅ Lokasi terpilih untuk update WhatsApp gabungan")
+    st.markdown("### ✅ Pilih beberapa lokasi untuk update WhatsApp gabungan")
 
-    selected_indices = st.session_state.get("selected_indices", [])
+    def make_label(idx):
+        row = filtered.loc[idx]
+        no = row.get("No", idx)
+        prov = clean_optional(row.get("Provinsi", ""))
+        kab = clean_optional(row.get("Kabupaten", ""))
+        posko = clean_optional(
+            row.get(
+                "Posko & Penjelasan Jumlah Orang, Berdasarkan Jenis Kelamin dan Usia",
+                "",
+            )
+        )
+        return f"{no} – {prov or '-'} / {kab or '-'} – {posko[:40]}{'…' if len(posko) > 40 else ''}"
 
-    if selected_indices:
-        st.caption(f"Jumlah lokasi terpilih: {len(selected_indices)}")
+    all_indices = list(filtered.index)
+
+    multi_selected_indices = st.multiselect(
+        "Pilih beberapa lokasi",
+        all_indices,
+        format_func=make_label,
+        key="multi_select_locations",
+    )
+
+    if multi_selected_indices:
+        st.caption(f"Jumlah lokasi terpilih: {len(multi_selected_indices)}")
 
         bodies = []
         last_updates_detail = []
 
-        def make_label(idx):
-            row = filtered.loc[idx]
-            no = row.get("No", idx)
-            prov = clean_optional(row.get("Provinsi", ""))
-            kab = clean_optional(row.get("Kabupaten", ""))
-            posko = clean_optional(
-                row.get(
-                    "Posko & Penjelasan Jumlah Orang, Berdasarkan Jenis Kelamin dan Usia",
-                    "",
-                )
-            )
-            return f"{no} – {prov or '-'} / {kab or '-'} – {posko[:40]}{'…' if len(posko) > 40 else ''}"
-
-        for i, idx in enumerate(selected_indices, start=1):
+        for i, idx in enumerate(multi_selected_indices, start=1):
             row = filtered.loc[idx]
             lu = row.get("Last Update", "")
             body_partial, _ = build_whatsapp_message(
@@ -525,7 +531,9 @@ def main():
             kab = clean_optional(row.get("Kabupaten", ""))
             header = f"*Lokasi {i} – {prov or '-'} / {kab or '-'}*"
             bodies.append(header + "\n" + body_partial)
-            last_updates_detail.append((i, make_label(idx), lu))
+
+            label = make_label(idx)
+            last_updates_detail.append((i, label, lu))
 
         combined_body = "\n\n——————————\n\n".join(bodies)
         combined_body += (
@@ -556,7 +564,7 @@ def main():
             else:
                 st.write("_Belum ada update tertulis._")
     else:
-        st.caption("Belum ada lokasi yang dipilih. Centang kolom **Pilih** di tabel di atas.")
+        st.caption("Belum ada lokasi yang dipilih. Pilih minimal satu lokasi di dropdown di atas.")
 
 
 if __name__ == "__main__":
