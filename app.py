@@ -261,13 +261,21 @@ def main():
     else:
         df["Last Update (full)"] = ""
 
-    # identify WA kolom untuk korlap
+    # identify WA kolom untuk korlap & pusat
     wa_korlap_col = None
+    wa_pusat_col = None
     cols = list(df.columns)
+
     if "Nama Relawan Koordinator Lapangan" in df.columns:
         idx = cols.index("Nama Relawan Koordinator Lapangan")
         if idx - 1 >= 0:
             wa_korlap_col = cols[idx - 1]
+
+    if "Nama Relawan Koordinator Pusat - Posisi Standby" in df.columns:
+        idx = cols.index("Nama Relawan Koordinator Pusat - Posisi Standby")
+        # asumsi: kolom WA pusat ada tepat setelah nama pusat
+        if idx + 1 < len(cols):
+            wa_pusat_col = cols[idx + 1]
 
     # --- detail mode via query param ?row= ---
     query_params = st.experimental_get_query_params()
@@ -299,9 +307,15 @@ def main():
             korlap_name = clean_optional(
                 row.get("Nama Relawan Koordinator Lapangan", "")
             )
-            wa_raw = row.get(wa_korlap_col, "") if wa_korlap_col else ""
-            wa_norm = normalize_phone(wa_raw)
-            wa_pretty = clean_optional(wa_raw)
+            wa_korlap_raw = row.get(wa_korlap_col, "") if wa_korlap_col else ""
+            wa_korlap_norm = normalize_phone(wa_korlap_raw)
+            wa_korlap_pretty = clean_optional(wa_korlap_raw)
+
+            pusat_name = clean_optional(
+                row.get("Nama Relawan Koordinator Pusat - Posisi Standby", "")
+            )
+            wa_pusat_raw = row.get(wa_pusat_col, "") if wa_pusat_col else ""
+            wa_pusat_pretty = clean_optional(wa_pusat_raw)
 
             c1, c2 = st.columns([2.5, 1.2])
             with c1:
@@ -326,19 +340,30 @@ def main():
 
             with c2:
                 st.markdown("**PIC Lapangan**")
-                if korlap_name or wa_pretty:
+                if korlap_name or wa_korlap_pretty:
                     st.markdown(
                         f"{korlap_name or '-'}"
-                        + (f"<br/>📱 {wa_pretty}" if wa_pretty else ""),
+                        + (f"<br/>📱 {wa_korlap_pretty}" if wa_korlap_pretty else ""),
                         unsafe_allow_html=True,
                     )
                 else:
                     st.markdown("-")
 
-                if wa_norm:
+                if wa_korlap_norm:
                     msg = f"Halo {korlap_name or ''}, saya melihat update posko {kab or prov}."
-                    wa_link = f"https://wa.me/{wa_norm}?text={quote(msg)}"
+                    wa_link = f"https://wa.me/{wa_korlap_norm}?text={quote(msg)}"
                     st.markdown(f"[🔗 Chat WA]({wa_link})")
+
+                st.markdown("---")
+                st.markdown("**PIC Pusat**")
+                if pusat_name or wa_pusat_pretty:
+                    st.markdown(
+                        f"{pusat_name or '-'}"
+                        + (f"<br/>📱 {wa_pusat_pretty}" if wa_pusat_pretty else ""),
+                        unsafe_allow_html=True,
+                    )
+                else:
+                    st.markdown("-")
 
                 st.markdown("---")
                 if gmap:
@@ -439,9 +464,15 @@ def main():
         korlap_name = clean_optional(
             row.get("Nama Relawan Koordinator Lapangan", "")
         )
-        wa_raw = row.get(wa_korlap_col, "") if wa_korlap_col else ""
-        wa_norm = normalize_phone(wa_raw)
-        wa_pretty = clean_optional(wa_raw)
+        wa_korlap_raw = row.get(wa_korlap_col, "") if wa_korlap_col else ""
+        wa_korlap_norm = normalize_phone(wa_korlap_raw)
+        wa_korlap_pretty = clean_optional(wa_korlap_raw)
+
+        pusat_name = clean_optional(
+            row.get("Nama Relawan Koordinator Pusat - Posisi Standby", "")
+        )
+        wa_pusat_raw = row.get(wa_pusat_col, "") if wa_pusat_col else ""
+        wa_pusat_pretty = clean_optional(wa_pusat_raw)
 
         # timeline update
         timeline_items = []
@@ -474,19 +505,30 @@ def main():
 
             with c2:
                 st.markdown("**PIC Lapangan**")
-                if korlap_name or wa_pretty:
+                if korlap_name or wa_korlap_pretty:
                     st.markdown(
                         f"{korlap_name or '-'}"
-                        + (f"<br/>📱 {wa_pretty}" if wa_pretty else ""),
+                        + (f"<br/>📱 {wa_korlap_pretty}" if wa_korlap_pretty else ""),
                         unsafe_allow_html=True,
                     )
                 else:
                     st.markdown("-")
 
-                if wa_norm:
+                if wa_korlap_norm:
                     msg = f"Halo {korlap_name or ''}, saya melihat update posko {kab or prov}."
-                    wa_link = f"https://wa.me/{wa_norm}?text={quote(msg)}"
+                    wa_link = f"https://wa.me/{wa_korlap_norm}?text={quote(msg)}"
                     st.markdown(f"[🔗 Chat WA]({wa_link})")
+
+                st.markdown("---")
+                st.markdown("**PIC Pusat**")
+                if pusat_name or wa_pusat_pretty:
+                    st.markdown(
+                        f"{pusat_name or '-'}"
+                        + (f"<br/>📱 {wa_pusat_pretty}" if wa_pusat_pretty else ""),
+                        unsafe_allow_html=True,
+                    )
+                else:
+                    st.markdown("-")
 
                 st.markdown("---")
                 if gmap:
