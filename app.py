@@ -478,17 +478,43 @@ def main():
                 if lat and lon and not pd.isna(lat) and not pd.isna(lon):
                     st.caption(f"Lat: {lat:.4f}, Lon: {lon:.4f}")
 
-                detail_url = f"?row={idx}"
-                st.markdown(f"[🔎 Lihat detail lengkap]({detail_url})")
+detail_url = f"?row={idx}"
+st.markdown(f"[🔎 Lihat detail lengkap]({detail_url})")
 
-                # checkbox untuk seleksi card
-                selected = st.checkbox("Pilih lokasi ini", key=f"select_{idx}")
-                if selected:
-                    selected_indices.append(idx)
+# baris: checkbox + tombol scroll ke WA
+cb_col, btn_col = st.columns([1, 1.4])
 
-    # === WHATSAPP GABUNGAN UNTUK CARD TERPILIH ===
-    st.markdown("---")
-    st.markdown("### ✅ Lokasi terpilih – Pesan WhatsApp gabungan")
+with cb_col:
+    selected = st.checkbox("Pilih lokasi ini", key=f"select_{idx}")
+    if selected:
+        selected_indices.append(idx)
+
+with btn_col:
+    st.markdown(
+        """
+        <a href="#wa-section">
+            <button style="
+                padding:4px 10px;
+                border-radius:6px;
+                border:1px solid #999;
+                background-color:white;
+                cursor:pointer;
+                font-size:0.9rem;
+            ">
+                ⬇️ Ke bagian WhatsApp
+            </button>
+        </a>
+        """,
+        unsafe_allow_html=True,
+    )
+
+# === WHATSAPP GABUNGAN UNTUK CARD TERPILIH ===
+st.markdown("---")
+
+# anchor untuk scroll
+st.markdown('<a id="wa-section"></a>', unsafe_allow_html=True)
+
+st.markdown("### ✅ Lokasi terpilih – Pesan WhatsApp gabungan")
 
     if selected_indices:
         st.caption(f"Jumlah lokasi terpilih: {len(selected_indices)}")
