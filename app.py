@@ -11,7 +11,7 @@ SHEET_ID = "1KeLHH2u_BmPsvaPMX2oxw0cbeHLV8CdMiphHtFvOfTY"
 GID = "0"
 SHEET_CSV_URL = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/export?format=csv&gid={GID}"
 
-# === UTIL: format waktu WIB ===
+# === UTIL: waktu WIB ===
 MONTH_ID = {
     1: "Januari",
     2: "Februari",
@@ -35,7 +35,6 @@ def now_wib_str():
 
 # === DATA LOADER ===
 def clean_region_name(val):
-    """Bersihkan nama provinsi/kabupaten: strip, rapikan spasi, title-case + beberapa pengecualian."""
     if pd.isna(val):
         return ""
     s = str(val).strip()
@@ -52,10 +51,11 @@ def clean_region_name(val):
     return s.title()
 
 
-@st.cache_data(ttl=300)
+@st.cache_data(ttl=180)
 def load_raw_data() -> pd.DataFrame:
     raw = pd.read_csv(SHEET_CSV_URL, header=None)
 
+    # cari baris header (kolom pertama "No")
     header_row_candidates = raw.index[raw.iloc[:, 0].astype(str).str.strip() == "No"]
     if len(header_row_candidates) == 0:
         st.error("Tidak menemukan baris header dengan kolom pertama 'No'. Mohon cek format Google Sheet.")
@@ -64,6 +64,7 @@ def load_raw_data() -> pd.DataFrame:
 
     headers = raw.iloc[header_row].tolist()
 
+    # handle header duplikat
     seen = {}
     cleaned_headers = []
     for h in headers:
@@ -75,7 +76,7 @@ def load_raw_data() -> pd.DataFrame:
             seen[h] += 1
             cleaned_headers.append(f"{h} ({seen[h]})")
 
-    data = raw.iloc[header_row + 1:].copy()
+    data = raw.iloc[header_row + 1 :].copy()
     data.columns = cleaned_headers
     data = data.dropna(how="all")
 
@@ -91,7 +92,6 @@ def load_raw_data() -> pd.DataFrame:
 
 def add_lat_lon_columns(df: pd.DataFrame) -> pd.DataFrame:
     lat_col, lon_col = None, None
-
     for c in df.columns:
         cl = c.lower()
         if cl in ("lat", "latitude"):
@@ -141,8 +141,18 @@ def add_lat_lon_columns(df: pd.DataFrame) -> pd.DataFrame:
 
 
 # === HELPERS ===
+def clean_optional(val: object) -> str:
+    if val is None:
+        return ""
+    s = str(val).strip()
+    if not s:
+        return ""
+    if s.lower() in ("nan", "none", "-"):
+        return ""
+    return s
+
+
 def normalize_phone(phone):
-    """Convert phone to WhatsApp-ready format: 62xxxxxxxxx."""
     if phone is None:
         return None
     s = str(phone)
@@ -170,115 +180,15 @@ def compute_last_update(row: pd.Series, update_cols):
     return ""
 
 
-def clean_optional(val: object) -> str:
-    """Bersihkan nilai optional: jadikan '' jika kosong / nan / none / '-'."""
-    if val is None:
-        return ""
-    s = str(val).strip()
-    if not s:
-        return ""
-    if s.lower() in ("nan", "none", "-"):
-        return ""
-    return s
-
-
-def build_whatsapp_message(
-    row: pd.Series,
-    wa_pusat_col,
-    wa_korlap_col,
-    last_update,
-    include_footer=True,
-):
-    prov = clean_optional(row.get("Provinsi", ""))
-    kab = clean_optional(row.get("Kabupaten", ""))
-    posko = clean_optional(
-        row.get("Posko & Penjelasan Jumlah Orang, Berdasarkan Jenis Kelamin dan Usia", "")
-    )
-    needs = clean_optional(row.get("List Kebutuhan Mendesak", ""))
-    dapur_umum = clean_optional(row.get("Apakah Ada Dapur Umum?", ""))
-    dukungan = clean_optional(row.get("Dukungan yang bisa di offer ke sesama jaringan", ""))
-    gmap = clean_optional(row.get("Link Google Map", ""))
-    foto = clean_optional(row.get("Link Foto / Sosmed / Google Drive", ""))
-
-    pusat_name = clean_optional(row.get("Nama Relawan Koordinator Pusat - Posisi Standby", ""))
-    korlap_name = clean_optional(row.get("Nama Relawan Koordinator Lapangan", ""))
-
-    wa_pusat_raw = row.get(wa_pusat_col, "") if wa_pusat_col else ""
-    wa_korlap_raw = row.get(wa_korlap_col, "") if wa_korlap_col else ""
-
-    wa_pusat_norm = normalize_phone(wa_pusat_raw)
-    wa_korlap_norm = normalize_phone(wa_korlap_raw)
-
-    wa_pusat_pretty = clean_optional(wa_pusat_raw)
-    wa_korlap_pretty = clean_optional(wa_korlap_raw)
-
-    title = f"*[Koordinasi Bantuan – {prov or '-'} / {kab or '-'}]*".strip()
-
-    parts = [
-        title,
-        "",
-        "*Lokasi / Posko*",
-        posko or "-",
-        "",
-        "*Provinsi*: " + (prov or "-"),
-        "*Kab/Kota*: " + (kab or "-"),
-        "",
-        "*PIC Lapangan*: "
-        + (korlap_name or "-")
-        + (f" ({wa_korlap_pretty})" if wa_korlap_pretty else ""),
-        "*PIC Pusat*: "
-        + (pusat_name or "-")
-        + (f" ({wa_pusat_pretty})" if wa_pusat_pretty else ""),
-        "",
-        "*List Kebutuhan Mendesak*:",
-        needs or "-",
-    ]
-    if dapur_umum:
-        parts += ["", "*Dapur Umum*: " + dapur_umum]
-    if dukungan:
-        parts += ["", "*Dukungan dari jaringan*: " + dukungan]
-    if last_update:
-        parts += ["", "*Update Terakhir*:", last_update]
-
-    if gmap:
-        parts += ["", "📍 Map: " + gmap]
-    if foto:
-        parts += ["", "🖼 Dokumentasi: " + foto]
-
-    if include_footer:
-        parts += [
-            "",
-            "👉 Mohon update perkembangan terakhir di form bersama:",
-            "http://tiny.cc/updaterelawan",
-            "",
-            "_Satu sumber data jaringan relawan_",
-        ]
-
-    body = "\n".join(parts).strip()
-
-    if wa_korlap_norm:
-        wa_link = f"https://wa.me/{wa_korlap_norm}?text={quote(body)}"
-    else:
-        wa_link = f"https://wa.me/?text={quote(body)}"
-
-    return body, wa_link
-
-
 # === MAIN APP ===
 def main():
     st.set_page_config(
-        page_title="Koordinasi Bantuan Emergency",
+        page_title="Card Dashboard Koordinasi Bantuan",
         layout="wide",
     )
 
-    st.title("📊 Update Harian Koordinasi Bantuan Emergency")
+    st.title("📇 Card Dashboard Lokasi & Update")
     st.caption(f"Waktu saat ini (WIB): {now_wib_str()}")
-
-    st.info(
-        "Untuk update perkembangan posko & jaringan relawan, "
-        "gunakan form bersama: **http://tiny.cc/updaterelawan**\n\n"
-        "_Satu sumber data jaringan relawan_"
-    )
 
     df = load_raw_data()
     df = add_lat_lon_columns(df)
@@ -287,93 +197,63 @@ def main():
         st.warning("Belum ada data di Google Sheet.")
         st.stop()
 
-    # Identify WA columns
-    wa_pusat_col = None
+    update_cols = get_update_columns(df)
+    if update_cols:
+        df["Last Update (full)"] = df.apply(lambda r: compute_last_update(r, update_cols), axis=1)
+    else:
+        df["Last Update (full)"] = ""
+
+    # Identify WA kolom untuk korlap
     wa_korlap_col = None
     cols = list(df.columns)
-
-    if "Nama Relawan Koordinator Pusat - Posisi Standby" in df.columns:
-        idx = cols.index("Nama Relawan Koordinator Pusat - Posisi Standby")
-        if idx + 1 < len(cols):
-            wa_pusat_col = cols[idx + 1]
-
     if "Nama Relawan Koordinator Lapangan" in df.columns:
         idx = cols.index("Nama Relawan Koordinator Lapangan")
         if idx - 1 >= 0:
             wa_korlap_col = cols[idx - 1]
 
-    update_cols = get_update_columns(df)
-    if update_cols:
-        df["Last Update"] = df.apply(lambda r: compute_last_update(r, update_cols), axis=1)
-    else:
-        df["Last Update"] = ""
+    # === FILTER GLOBAL DI ATAS ===
+    st.markdown("### 🔍 Filter")
 
-    # logika internal (tidak ditampilkan)
-    def is_ready(row):
-        has_needs = bool(str(row.get("List Kebutuhan Mendesak", "")).strip())
-        has_kab = bool(str(row.get("Kabupaten", "")).strip())
-        wa_raw = row.get(wa_korlap_col, "") if wa_korlap_col else ""
-        has_wa = normalize_phone(wa_raw) is not None
-        return has_needs and has_kab and has_wa
+    col_f1, col_f2, col_f3 = st.columns([1.2, 1.2, 1.4])
 
-    df["Siap Dibantu"] = df.apply(is_ready, axis=1)
-
-    # === SIDEBAR FILTERS ===
-    with st.sidebar:
-        st.header("Filter")
-
+    with col_f1:
         provinsi_list = sorted(
             [p for p in df["Provinsi"].dropna().astype(str).unique() if p and p.lower() != "nan"]
         )
         prov_sel = st.multiselect("Provinsi", provinsi_list, default=provinsi_list)
 
-        kabupaten_list = sorted(
-            [k for k in df["Kabupaten"].dropna().astype(str).unique() if k and k.lower() != "nan"]
-        )
-        kab_sel = st.multiselect("Kabupaten", kabupaten_list)
+    with col_f2:
+        name_col = "Nama Relawan Koordinator Lapangan"
+        if name_col in df.columns:
+            name_list = (
+                df[name_col]
+                .dropna()
+                .astype(str)
+                .map(str.strip)
+            )
+            uniq_names = sorted({n for n in name_list if n and n.lower() != "nan"})
+        else:
+            uniq_names = []
+        name_sel = st.multiselect("Nama PIC Lapangan", uniq_names)
 
-        dukungan_only = st.checkbox(
-            "Hanya yang punya 'Dukungan yang bisa di offer ke sesama jaringan'",
-            value=False,
-        )
-
-        kebutuhan_filter = st.text_input("Filter 'List Kebutuhan Mendesak' (kata kunci)")
-
-        search_text = st.text_input("Cari kata kunci umum (posko / PIC / update)")
+    with col_f3:
+        search_text = st.text_input("Cari kata kunci (posko, kabupaten, update, kebutuhan)")
 
     filtered = df.copy()
     if prov_sel:
         filtered = filtered[filtered["Provinsi"].isin(prov_sel)]
-    if kab_sel:
-        filtered = filtered[filtered["Kabupaten"].isin(kab_sel)]
-
-    if dukungan_only and "Dukungan yang bisa di offer ke sesama jaringan" in filtered.columns:
-        col_dukung = "Dukungan yang bisa di offer ke sesama jaringan"
-        filtered = filtered[
-            filtered[col_dukung].astype(str).str.strip().ne("")
-            & filtered[col_dukung].notna()
-        ]
-
-    if kebutuhan_filter and "List Kebutuhan Mendesak" in filtered.columns:
-        pattern2 = kebutuhan_filter.lower()
-        filtered = filtered[
-            filtered["List Kebutuhan Mendesak"]
-            .astype(str)
-            .str.lower()
-            .str.contains(pattern2)
-        ]
+    if name_sel and "Nama Relawan Koordinator Lapangan" in filtered.columns:
+        filtered = filtered[filtered["Nama Relawan Koordinator Lapangan"].isin(name_sel)]
 
     if search_text:
         pattern = search_text.lower()
 
         def matches(row):
             cols_to_search = [
+                "Kabupaten",
                 "Posko & Penjelasan Jumlah Orang, Berdasarkan Jenis Kelamin dan Usia",
                 "List Kebutuhan Mendesak",
-                "Nama Relawan Koordinator Lapangan",
-                "Nama Relawan Koordinator Pusat - Posisi Standby",
-                "Last Update",
-                "Dukungan yang bisa di offer ke sesama jaringan",
+                "Last Update (full)",
             ]
             for c in cols_to_search:
                 if c in row.index:
@@ -384,38 +264,94 @@ def main():
 
         filtered = filtered[filtered.apply(matches, axis=1)]
 
-    # === SUMMARY METRICS (simple) ===
-    col1, col2 = st.columns(2)
-    with col1:
-        st.metric("Total Lokasi (semua data)", len(df))
-    with col2:
-        st.metric("Lokasi Terfilter Saat Ini", len(filtered))
+    st.markdown(
+        f"**Lokasi terfilter:** {len(filtered)} dari total {len(df)} lokasi."
+    )
 
     if filtered.empty:
-        st.info("Tidak ada lokasi yang cocok dengan filter. Silakan atur ulang filter di sebelah kiri.")
+        st.info("Tidak ada lokasi yang cocok dengan filter. Silakan atur ulang filter di atas.")
         return
 
-    # === UNIQUE PIC PUSAT ===
-    pusat_col = "Nama Relawan Koordinator Pusat - Posisi Standby"
-    if pusat_col in filtered.columns:
-        names = (
-            filtered[pusat_col]
-            .dropna()
-            .astype(str)
-            .map(str.strip)
-        )
-        unique_names = sorted({n for n in names if n and n.lower() != "nan"})
-        if unique_names:
-            st.markdown("### 👥 PIC Pusat dalam filter ini")
-            for n in unique_names:
-                st.markdown(f"- {n}")
+    # === CARD DASHBOARD ===
+    st.markdown("### 🧩 Daftar Lokasi (Card View)")
 
-    # === MAP VIEW ===
+    for idx, row in filtered.iterrows():
+        prov = clean_optional(row.get("Provinsi", ""))
+        kab = clean_optional(row.get("Kabupaten", ""))
+        posko = clean_optional(
+            row.get("Posko & Penjelasan Jumlah Orang, Berdasarkan Jenis Kelamin dan Usia", "")
+        )
+        kebutuhan = clean_optional(row.get("List Kebutuhan Mendesak", ""))
+        dukungan = clean_optional(row.get("Dukungan yang bisa di offer ke sesama jaringan", ""))
+        gmap = clean_optional(row.get("Link Google Map", ""))
+        lat = row.get("lat", None)
+        lon = row.get("lon", None)
+
+        korlap_name = clean_optional(row.get("Nama Relawan Koordinator Lapangan", ""))
+        wa_raw = row.get(wa_korlap_col, "") if wa_korlap_col else ""
+        wa_norm = normalize_phone(wa_raw)
+        wa_pretty = clean_optional(wa_raw)
+
+        # kumpulkan semua update sebagai timeline
+        timeline_items = []
+        for col in update_cols:
+            val = clean_optional(row.get(col, ""))
+            if val:
+                timeline_items.append(f"**{col}** – {val}")
+
+        # card container
+        with st.container():
+            st.markdown("---")
+            c1, c2 = st.columns([3, 1.1])
+
+            with c1:
+                st.markdown(
+                    f"#### {prov or '-'} / {kab or '-'}"
+                )
+                if posko:
+                    st.markdown(f"**Posko:** {posko}")
+                if kebutuhan:
+                    st.markdown(f"**Kebutuhan mendesak:** {kebutuhan}")
+                if dukungan:
+                    st.markdown(f"**Dukungan dari jaringan:** {dukungan}")
+
+                # timeline update
+                if timeline_items:
+                    st.markdown("**🕒 Timeline Update:**")
+                    for item in timeline_items:
+                        st.markdown(f"- {item}")
+                else:
+                    st.markdown("_Belum ada update tertulis._")
+
+            with c2:
+                st.markdown("**PIC Lapangan**")
+                if korlap_name or wa_pretty:
+                    st.markdown(
+                        f"{korlap_name or '-'}"
+                        + (f"<br/>📱 {wa_pretty}" if wa_pretty else ""),
+                        unsafe_allow_html=True,
+                    )
+                else:
+                    st.markdown("-")
+
+                if wa_norm:
+                    msg = f"Halo {korlap_name or ''}, saya melihat update posko {kab or prov}."
+                    wa_link = f"https://wa.me/{wa_norm}?text={quote(msg)}"
+                    st.markdown(f"[🔗 Chat WA]({wa_link})")
+
+                st.markdown("---")
+
+                if gmap:
+                    st.markdown(f"[📍 Buka Google Maps]({gmap})")
+                if lat and lon and not pd.isna(lat) and not pd.isna(lon):
+                    st.caption(f"Lat: {lat:.4f}, Lon: {lon:.4f}")
+
+    # === MAP DI BAWAH KARTU ===
+    st.markdown("---")
     st.markdown("### 🗺️ Peta Lokasi Terfilter")
 
     if "lat" in filtered.columns and "lon" in filtered.columns:
         map_data = filtered.dropna(subset=["lat", "lon"]).copy()
-
         if not map_data.empty:
             map_data["Provinsi_display"] = map_data["Provinsi"].astype(str)
             map_data["Kabupaten_display"] = map_data["Kabupaten"].astype(str)
@@ -458,113 +394,6 @@ def main():
             st.caption("Tidak ada koordinat lat/long yang bisa ditampilkan.")
     else:
         st.caption("Kolom koordinat (lat/long) belum tersedia di data.")
-
-    # === TABLE VIEW (read-only) ===
-    st.markdown("### 📌 Daftar Lokasi")
-
-    table_df = filtered.copy()
-    table_df["Last Update (ringkas)"] = table_df["Last Update"].astype(str).apply(
-        lambda x: x if len(x) <= 25 else x[:22] + "..."
-    )
-
-    show_cols = [
-        "No",
-        "Provinsi",
-        "Kabupaten",
-        "Posko & Penjelasan Jumlah Orang, Berdasarkan Jenis Kelamin dan Usia",
-        "List Kebutuhan Mendesak",
-        "Dukungan yang bisa di offer ke sesama jaringan",
-        "Nama Relawan Koordinator Lapangan",
-        "Last Update (ringkas)",
-    ]
-    show_cols = [c for c in show_cols if c in table_df.columns]
-
-    st.dataframe(
-        table_df[show_cols],
-        use_container_width=True,
-        hide_index=True,
-        height=360,
-    )
-    st.caption(
-        "Tabel hanya untuk lihat data cepat. Gunakan pilihan di bawah untuk membuat pesan WhatsApp gabungan."
-    )
-
-    # === WHATSAPP GABUNGAN (multiselect) ===
-    st.markdown("---")
-    st.markdown("### ✅ Pilih beberapa lokasi untuk update WhatsApp gabungan")
-
-    def make_label(idx):
-        row = filtered.loc[idx]
-        no = row.get("No", idx)
-        prov = clean_optional(row.get("Provinsi", ""))
-        kab = clean_optional(row.get("Kabupaten", ""))
-        posko = clean_optional(
-            row.get(
-                "Posko & Penjelasan Jumlah Orang, Berdasarkan Jenis Kelamin dan Usia",
-                "",
-            )
-        )
-        return f"{no} – {prov or '-'} / {kab or '-'} – {posko[:40]}{'…' if len(posko) > 40 else ''}"
-
-    all_indices = list(filtered.index)
-
-    multi_selected_indices = st.multiselect(
-        "Pilih beberapa lokasi",
-        all_indices,
-        format_func=make_label,
-        key="multi_select_locations",
-    )
-
-    if multi_selected_indices:
-        st.caption(f"Jumlah lokasi terpilih: {len(multi_selected_indices)}")
-
-        bodies = []
-        last_updates_detail = []
-
-        for i, idx in enumerate(multi_selected_indices, start=1):
-            row = filtered.loc[idx]
-            lu = row.get("Last Update", "")
-            body_partial, _ = build_whatsapp_message(
-                row, wa_pusat_col, wa_korlap_col, lu, include_footer=False
-            )
-            prov = clean_optional(row.get("Provinsi", ""))
-            kab = clean_optional(row.get("Kabupaten", ""))
-            header = f"*Lokasi {i} – {prov or '-'} / {kab or '-'}*"
-            bodies.append(header + "\n" + body_partial)
-
-            label = make_label(idx)
-            last_updates_detail.append((i, label, lu))
-
-        combined_body = "\n\n——————————\n\n".join(bodies)
-        combined_body += (
-            "\n\n👉 Mohon update perkembangan terakhir di form bersama:\n"
-            "http://tiny.cc/updaterelawan\n\n"
-            "_Satu sumber data jaringan relawan_"
-        )
-
-        wa_link_multi = f"https://wa.me/?text={quote(combined_body)}"
-
-        st.markdown("#### Pesan WhatsApp (gabungan, bisa di-copy)")
-        st.text_area(
-            "Body WA (multi)",
-            value=combined_body,
-            height=320,
-            key="wa_multi_body",
-        )
-        st.markdown(
-            f"[🔗 Buka WhatsApp dengan pesan ini (multi)]({wa_link_multi})",
-            help="Klik untuk membuka WhatsApp Web / aplikasi dengan pesan gabungan.",
-        )
-
-        st.markdown("#### Detail Last Update per lokasi terpilih")
-        for i, label, lu in last_updates_detail:
-            st.markdown(f"**Lokasi {i} – {label}**")
-            if str(lu).strip():
-                st.write(lu)
-            else:
-                st.write("_Belum ada update tertulis._")
-    else:
-        st.caption("Belum ada lokasi yang dipilih. Pilih minimal satu lokasi di dropdown di atas.")
 
 
 if __name__ == "__main__":
