@@ -187,6 +187,20 @@ def compute_last_update(row: pd.Series, update_cols):
     return ""
 
 
+def compute_update_level(row: pd.Series, update_cols):
+    """Level update tertinggi (misal punya Update 1..5 → 5)."""
+    max_n = 0
+    for col in update_cols:
+        val = row.get(col, None)
+        if pd.notna(val) and str(val).strip():
+            m = re.search(r"(\d+)", str(col))
+            if m:
+                n = int(m.group(1))
+                if n > max_n:
+                    max_n = n
+    return max_n
+
+
 def build_whatsapp_body_for_row(row: pd.Series, update_cols, wa_korlap_col):
     """Pesan WA format rapi untuk satu lokasi (dipakai di gabungan)."""
     prov = clean_optional(row.get("Provinsi", ""))
@@ -258,8 +272,10 @@ def main():
     update_cols = get_update_columns(df)
     if update_cols:
         df["Last Update (full)"] = df.apply(lambda r: compute_last_update(r, update_cols), axis=1)
+        df["Update_Level"] = df.apply(lambda r: compute_update_level(r, update_cols), axis=1)
     else:
         df["Last Update (full)"] = ""
+        df["Update_Level"] = 0
 
     # identify WA kolom untuk korlap & pusat
     wa_korlap_col = None
@@ -431,6 +447,32 @@ def main():
             return False
 
         filtered = filtered[filtered.apply(matches, axis=1)]
+
+    # === SORT CONTROL ===
+    st.markdown("### ⚙️ Pengurutan")
+    sort_option = st.radio(
+        "Urutkan berdasarkan:",
+        ("Entry terbaru (default)", "Update paling tinggi", "Urutan input"),
+        index=0,  # default: Entry terbaru
+        horizontal=True,
+    )
+
+    if sort_option.startswith("Entry terbaru"):
+        # Entry / baris terbaru, pakai No terbesar kalau ada
+        if "No" in filtered.columns:
+            filtered = filtered.sort_values("No", ascending=False)
+        else:
+            filtered = filtered.sort_values("__row_index", ascending=False)
+
+    elif sort_option == "Update paling tinggi":
+        # Lokasi dengan level update tertinggi (Update_Level) di atas
+        filtered = filtered.sort_values(
+            ["Update_Level", "__row_index"], ascending=[False, False]
+        )
+
+    elif sort_option == "Urutan input":
+        # Kembali ke urutan input asli
+        filtered = filtered.sort_values("__row_index", ascending=True)
 
     st.markdown(
         f"**Lokasi terfilter:** {len(filtered)} dari total {len(df)} lokasi."
