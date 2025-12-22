@@ -33,7 +33,152 @@ def now_wib_str():
     return f"{now.day:02d} {MONTH_ID[now.month]} {now.year}, {now:%H:%M:%S} WIB"
 
 
-# === DATA LOADER ===
+# === GLOBAL STYLING (ala Gojek) ===
+def inject_css():
+    st.markdown(
+        """
+<style>
+:root {
+  --lc-bg: #020617;
+  --lc-card-bg: #020617;
+  --lc-card-border: #111827;
+  --lc-accent: #22c55e;
+  --lc-accent-soft: rgba(34,197,94,0.12);
+  --lc-text-main: #f9fafb;
+  --lc-text-muted: #9ca3af;
+}
+
+.stApp {
+  background: radial-gradient(circle at top left, #020617 0, #020617 40%, #000000 100%);
+  color: var(--lc-text-main);
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, "SF Pro Display", sans-serif;
+}
+
+/* Title spacing */
+h1 {
+  font-weight: 800 !important;
+  letter-spacing: 0.02em;
+}
+
+/* General section card */
+.lc-section {
+  background: rgba(15,23,42,0.96);
+  border-radius: 18px;
+  border: 1px solid rgba(55,65,81,0.75);
+  padding: 1.25rem 1.5rem 1.2rem;
+  margin-bottom: 1.5rem;
+  box-shadow: 0 20px 40px rgba(0,0,0,0.55);
+}
+
+.lc-section-title {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  font-size: 1.22rem;
+  font-weight: 700;
+  margin-bottom: 0.75rem;
+}
+
+.lc-section-title span.icon {
+  width: 26px;
+  height: 26px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: var(--lc-accent-soft);
+  color: var(--lc-accent);
+}
+
+/* Badge kecil untuk info status */
+.lc-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.25rem 0.65rem;
+  border-radius: 999px;
+  font-size: 0.74rem;
+  background: var(--lc-accent-soft);
+  color: var(--lc-accent);
+  border: 1px solid rgba(34,197,94,0.6);
+}
+
+/* Card item untuk tiap lokasi */
+.lc-card-item {
+  background: linear-gradient(135deg, #020617 0%, #030712 50%, #020617 100%);
+  border-radius: 18px;
+  border: 1px solid rgba(55,65,81,0.85);
+  padding: 1rem 1.15rem 0.95rem;
+  margin-bottom: 1rem;
+  box-shadow: 0 18px 35px rgba(0,0,0,0.55);
+}
+
+.lc-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 0.9rem;
+}
+
+.lc-card-title {
+  font-size: 1.05rem;
+  font-weight: 700;
+}
+
+.lc-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.15rem 0.6rem;
+  border-radius: 999px;
+  font-size: 0.7rem;
+  background: #020617;
+  border: 1px solid rgba(148,163,184,0.7);
+  color: var(--lc-text-muted);
+}
+
+/* Tweaks untuk widgets bawaan supaya lebih sleek */
+div[data-testid="stMultiSelect"] > div > div {
+  border-radius: 999px !important;
+}
+
+div[data-testid="stRadio"] > label {
+  font-size: 0.9rem;
+}
+
+button[kind="secondary"] {
+  border-radius: 999px !important;
+}
+</style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def section_start(title: str, icon: str = ""):
+    st.markdown(
+        f"""
+        <div class="lc-section">
+          <div class="lc-section-title">
+            <span class="icon">{icon}</span>
+            <span>{title}</span>
+          </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def section_end():
+    st.markdown("</div>", unsafe_allow_html=True)
+
+
+def card_start():
+    st.markdown('<div class="lc-card-item">', unsafe_allow_html=True)
+
+
+def card_end():
+    st.markdown("</div>", unsafe_allow_html=True)
+
+
+# === DATA HELPERS ===
 def clean_region_name(val):
     if pd.isna(val):
         return ""
@@ -146,7 +291,6 @@ def add_lat_lon_columns(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-# === HELPERS ===
 def clean_optional(val: object) -> str:
     if val is None:
         return ""
@@ -189,7 +333,6 @@ def get_ordered_update_columns(df: pd.DataFrame, latest_first: bool = True):
         nums = re.findall(r"(\d+)", name)
         if not nums:
             continue
-        # ambil angka TERAKHIR di nama, biasanya nomor update
         n = int(nums[-1])
         found.append((n, col))
 
@@ -201,10 +344,7 @@ def get_ordered_update_columns(df: pd.DataFrame, latest_first: bool = True):
 
 
 def compute_last_update(row: pd.Series, update_cols_desc):
-    """
-    Ambil isi update paling baru (kolom nomor terbesar) yang terisi.
-    update_cols_desc sudah diurutkan dari terbesar → terkecil.
-    """
+    """Ambil isi update paling baru (kolom nomor terbesar) yang terisi."""
     for col in update_cols_desc:
         val = row.get(col, None)
         if pd.notna(val) and str(val).strip():
@@ -283,6 +423,8 @@ def main():
         layout="wide",
     )
 
+    inject_css()
+
     st.title("📇 Card Dashboard Lokasi & Update")
     st.caption(f"Waktu saat ini (WIB): {now_wib_str()}")
 
@@ -321,7 +463,6 @@ def main():
 
     if "Nama Relawan Koordinator Pusat - Posisi Standby" in df.columns:
         idx = cols.index("Nama Relawan Koordinator Pusat - Posisi Standby")
-        # asumsi: kolom WA pusat ada tepat setelah nama pusat
         if idx + 1 < len(cols):
             wa_pusat_col = cols[idx + 1]
 
@@ -335,7 +476,7 @@ def main():
         except ValueError:
             detail_idx = None
         if detail_idx is not None and detail_idx in df["__row_index"].values:
-            st.markdown("## 🔎 Detail Lokasi")
+            section_start("Detail Lokasi", "🔎")
             row = df[df["__row_index"] == detail_idx].iloc[0]
 
             prov = clean_optional(row.get("Provinsi", ""))
@@ -421,10 +562,10 @@ def main():
                 if foto:
                     st.markdown(f"[🖼 Dokumentasi]({foto})")
 
-            st.markdown("---")
+            section_end()
 
-    # === FILTER GLOBAL DI ATAS ===
-    st.markdown("### 🔍 Filter")
+    # === FILTER SECTION ===
+    section_start("Filter", "🔎")
 
     col_f1, col_f2, col_f3 = st.columns([1.2, 1.2, 1.4])
 
@@ -453,6 +594,8 @@ def main():
             "Cari kata kunci (posko, kabupaten, update, kebutuhan)"
         )
 
+    section_end()
+
     filtered = df.copy()
     if prov_sel:
         filtered = filtered[filtered["Provinsi"].isin(prov_sel)]
@@ -480,39 +623,40 @@ def main():
 
         filtered = filtered[filtered.apply(matches, axis=1)]
 
-    # === SORT CONTROL ===
-    st.markdown("### ⚙️ Pengurutan")
+    # === SORT SECTION ===
+    section_start("Pengurutan", "⚙️")
+
     sort_option = st.radio(
         "Urutkan berdasarkan:",
         ("Entry terbaru (default)", "Update paling tinggi", "Urutan input"),
-        index=0,  # default: Entry terbaru
+        index=0,
         horizontal=True,
     )
 
     if sort_option.startswith("Entry terbaru"):
-        # Entry / baris terbaru, pakai No terbesar kalau ada
         if "No" in filtered.columns:
             filtered = filtered.sort_values("No", ascending=False)
         else:
             filtered = filtered.sort_values("__row_index", ascending=False)
 
     elif sort_option == "Update paling tinggi":
-        # Lokasi dengan level update tertinggi (Update_Level) di atas
         filtered = filtered.sort_values(
             ["Update_Level", "__row_index"], ascending=[False, False]
         )
 
     elif sort_option == "Urutan input":
-        # Kembali ke urutan input asli
         filtered = filtered.sort_values("__row_index", ascending=True)
 
-    # === TIMELINE ORDER TOGGLE (UNTUK CARD) + HIDE NO-UPDATE ===
-    st.markdown("### 🕒 Pengaturan Timeline (Card)")
+    section_end()
+
+    # === TIMELINE SETTINGS SECTION ===
+    section_start("Pengaturan Timeline (Card)", "🕒")
+
     col_t1, col_t2 = st.columns(2)
     with col_t1:
         timeline_oldest_first = st.checkbox(
             "Timeline: tampilkan dari update paling lama dulu (Update 1 → ...)",
-            value=False,  # default = terbaru → lama
+            value=False,
         )
     with col_t2:
         hide_no_update_cards = st.checkbox(
@@ -520,19 +664,22 @@ def main():
             value=False,
         )
 
-    # kalau checkbox OFF → latest_first=True → besar → kecil
-    timeline_latest_first = not timeline_oldest_first
-
     st.markdown(
-        f"**Lokasi terfilter:** {len(filtered)} dari total {len(df)} lokasi."
+        f"<span class='lc-badge'>Lokasi terfilter: {len(filtered)} / {len(df)} lokasi</span>",
+        unsafe_allow_html=True,
     )
+
+    section_end()
+
+    # logika timeline
+    timeline_latest_first = not timeline_oldest_first
 
     if filtered.empty:
         st.info("Tidak ada lokasi yang cocok dengan filter. Silakan atur ulang filter di atas.")
         return
 
-    # === CARD DASHBOARD ===
-    st.markdown("### 🧩 Daftar Lokasi (Card View)")
+    # === CARD VIEW SECTION ===
+    section_start("Daftar Lokasi (Card View)", "🧩")
 
     selected_indices = []
 
@@ -565,7 +712,7 @@ def main():
         wa_pusat_raw = row.get(wa_pusat_col, "") if wa_pusat_col else ""
         wa_pusat_pretty = clean_optional(wa_pusat_raw)
 
-        # timeline update untuk CARD (ikut toggle)
+        # timeline update untuk CARD
         timeline_items = []
         if update_cols_desc:
             cols_for_timeline = update_cols_desc if timeline_latest_first else update_cols_asc
@@ -575,17 +722,21 @@ def main():
                     timeline_items.append(f"**{col}** – {val}")
 
         has_updates = bool(timeline_items)
-        # kalau diminta sembunyikan kartu tanpa update & memang tidak ada update → skip
         if hide_no_update_cards and not has_updates:
             continue
 
         with st.container():
-            st.markdown("---")
+            card_start()
+
+            # header dua kolom
             c1, c2 = st.columns([3, 1.1])
 
             with c1:
                 st.markdown(
-                    f"#### {prov or '-'} / {kab or '-'}"
+                    f"<div class='lc-card-header'>"
+                    f"<div class='lc-card-title'>{prov or '-'} / {kab or '-'}</div>"
+                    f"</div>",
+                    unsafe_allow_html=True,
                 )
                 if posko:
                     st.markdown(f"**Posko:** {posko}")
@@ -602,7 +753,6 @@ def main():
                     for item in timeline_items:
                         st.markdown(f"- {item}")
                 else:
-                    # hanya tampil kalau TIDAK disembunyikan
                     if not hide_no_update_cards:
                         st.markdown("_Belum ada update tertulis._")
 
@@ -642,11 +792,10 @@ def main():
                 detail_url = f"?row={idx}"
                 st.markdown(f"[🔎 Lihat detail lengkap]({detail_url})")
 
-                # baris: checkbox + tombol scroll ke WA
                 cb_col, btn_col = st.columns([1, 1.4])
 
                 with cb_col:
-                    selected = st.checkbox("Pilih lokasi ini", key=f"select_{idx}")
+                    selected = st.checkbox("Pilih lokasi", key=f"select_{idx}")
                     if selected:
                         selected_indices.append(idx)
 
@@ -656,11 +805,12 @@ def main():
                         <a href="#wa-section">
                             <button style="
                                 padding:4px 10px;
-                                border-radius:6px;
-                                border:1px solid #999;
-                                background-color:white;
+                                border-radius:999px;
+                                border:1px solid #4b5563;
+                                background-color:#020617;
                                 cursor:pointer;
                                 font-size:0.9rem;
+                                color:#e5e7eb;
                             ">
                                 ⬇️ Ke bagian WhatsApp
                             </button>
@@ -669,13 +819,13 @@ def main():
                         unsafe_allow_html=True,
                     )
 
-    # === WHATSAPP GABUNGAN UNTUK CARD TERPILIH ===
-    st.markdown("---")
+            card_end()
 
-    # anchor untuk scroll
+    section_end()
+
+    # === WHATSAPP GABUNGAN SECTION ===
     st.markdown('<a id="wa-section"></a>', unsafe_allow_html=True)
-
-    st.markdown("### ✅ Lokasi terpilih – Pesan WhatsApp gabungan")
+    section_start("Lokasi Terpilih – Pesan WhatsApp Gabungan", "✅")
 
     if selected_indices:
         st.caption(f"Jumlah lokasi terpilih: {len(selected_indices)}")
@@ -692,7 +842,6 @@ def main():
 
         combined_body = "\n\n——————————\n\n".join(bodies)
 
-        # tombol copy ke clipboard (HTML + JS sederhana)
         js_body = (
             combined_body.replace("\\", "\\\\")
             .replace("`", "\\`")
@@ -700,7 +849,8 @@ def main():
         st.markdown(
             f"""
             <button onclick="navigator.clipboard.writeText(`{js_body}`)"
-                    style="padding:6px 12px;border-radius:6px;border:1px solid #999;cursor:pointer;">
+                    style="padding:6px 12px;border-radius:999px;border:1px solid #4b5563;
+                           cursor:pointer;background:#020617;color:#e5e7eb;margin-bottom:0.5rem;">
                 Copy ke clipboard
             </button>
             """,
@@ -719,11 +869,12 @@ def main():
             help="Klik untuk membuka WhatsApp Web / aplikasi dengan pesan gabungan.",
         )
     else:
-        st.caption("Belum ada card yang dipilih. Centang 'Pilih lokasi ini' di kartu yang relevan.")
+        st.caption("Belum ada card yang dipilih. Centang 'Pilih lokasi' di kartu yang relevan.")
 
-    # === MAP DI BAWAH KARTU ===
-    st.markdown("---")
-    st.markdown("### 🗺️ Peta Lokasi Terfilter")
+    section_end()
+
+    # === MAP SECTION ===
+    section_start("Peta Lokasi Terfilter", "🗺️")
 
     if "lat" in filtered.columns and "lon" in filtered.columns:
         map_data = filtered.dropna(subset=["lat", "lon"]).copy()
@@ -769,6 +920,8 @@ def main():
             st.caption("Tidak ada koordinat lat/long yang bisa ditampilkan.")
     else:
         st.caption("Kolom koordinat (lat/long) belum tersedia di data.")
+
+    section_end()
 
 
 if __name__ == "__main__":
