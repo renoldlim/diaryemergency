@@ -201,6 +201,18 @@ def compute_update_level(row: pd.Series, update_cols):
     return max_n
 
 
+def order_update_cols(update_cols, latest_first=True):
+    """Urutkan nama kolom Update berdasarkan angka; latest_first=True → angka terbesar dulu."""
+    def key(col):
+        m = re.search(r"(\d+)", str(col))
+        return int(m.group(1)) if m else 0
+
+    cols_sorted = sorted(update_cols, key=key)  # dari kecil ke besar
+    if latest_first:
+        cols_sorted = list(reversed(cols_sorted))
+    return cols_sorted
+
+
 def build_whatsapp_body_for_row(row: pd.Series, update_cols, wa_korlap_col):
     """Pesan WA format rapi untuk satu lokasi (dipakai di gabungan)."""
     prov = clean_optional(row.get("Provinsi", ""))
@@ -227,15 +239,17 @@ def build_whatsapp_body_for_row(row: pd.Series, update_cols, wa_korlap_col):
         "",
     ]
 
-    # timeline update
+    # timeline update (selalu pakai urutan terbaru -> lama di WA)
     has_update = False
-    for col in update_cols:
-        val = clean_optional(row.get(col, ""))
-        if val:
-            if not has_update:
-                parts.append("*🕒 Timeline Update*")
-                has_update = True
-            parts.append(f"- *{col}*: {val}")
+    if update_cols:
+        cols_for_timeline = order_update_cols(update_cols, latest_first=True)
+        for col in cols_for_timeline:
+            val = clean_optional(row.get(col, ""))
+            if val:
+                if not has_update:
+                    parts.append("*🕒 Timeline Update*")
+                    has_update = True
+                parts.append(f"- *{col}*: {val}")
     if not has_update:
         parts.append("_Belum ada update tertulis._")
 
@@ -346,7 +360,11 @@ def main():
                 if update_cols:
                     st.markdown("**🕒 Timeline Update:**")
                     has_update = False
-                    for col in update_cols:
+                    # gunakan urutan global; default terbaru → lama
+                    # (checkbox timeline ada di bawah, tapi untuk detail
+                    #  kita tetap pakai terbaru → lama agar konsisten dan singkat)
+                    cols_for_timeline = order_update_cols(update_cols, latest_first=True)
+                    for col in cols_for_timeline:
                         val = clean_optional(row.get(col, ""))
                         if val:
                             has_update = True
@@ -474,6 +492,14 @@ def main():
         # Kembali ke urutan input asli
         filtered = filtered.sort_values("__row_index", ascending=True)
 
+    # === TIMELINE ORDER TOGGLE ===
+    st.markdown("### 🕒 Pengaturan Timeline")
+    timeline_oldest_first = st.checkbox(
+        "Timeline: tampilkan dari update paling lama dulu",
+        value=False,  # default = terbaru → lama
+    )
+    timeline_latest_first = not timeline_oldest_first
+
     st.markdown(
         f"**Lokasi terfilter:** {len(filtered)} dari total {len(df)} lokasi."
     )
@@ -516,12 +542,14 @@ def main():
         wa_pusat_raw = row.get(wa_pusat_col, "") if wa_pusat_col else ""
         wa_pusat_pretty = clean_optional(wa_pusat_raw)
 
-        # timeline update
+        # timeline update (ikut pengaturan global)
         timeline_items = []
-        for col in update_cols:
-            val = clean_optional(row.get(col, ""))
-            if val:
-                timeline_items.append(f"**{col}** – {val}")
+        if update_cols:
+            cols_for_timeline = order_update_cols(update_cols, latest_first=timeline_latest_first)
+            for col in cols_for_timeline:
+                val = clean_optional(row.get(col, ""))
+                if val:
+                    timeline_items.append(f"**{col}** – {val}")
 
         with st.container():
             st.markdown("---")
