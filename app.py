@@ -193,7 +193,6 @@ def get_ordered_update_columns(df: pd.DataFrame, latest_first: bool = True):
         n = int(nums[-1])
         found.append((n, col))
 
-    # kalau tidak ada kolom Update, return []
     if not found:
         return []
 
@@ -507,12 +506,20 @@ def main():
         # Kembali ke urutan input asli
         filtered = filtered.sort_values("__row_index", ascending=True)
 
-    # === TIMELINE ORDER TOGGLE (UNTUK CARD) ===
+    # === TIMELINE ORDER TOGGLE (UNTUK CARD) + HIDE NO-UPDATE ===
     st.markdown("### 🕒 Pengaturan Timeline (Card)")
-    timeline_oldest_first = st.checkbox(
-        "Timeline di kartu: tampilkan dari update paling lama dulu (Update 1 → ...)",
-        value=False,  # default = terbaru → lama
-    )
+    col_t1, col_t2 = st.columns(2)
+    with col_t1:
+        timeline_oldest_first = st.checkbox(
+            "Timeline: tampilkan dari update paling lama dulu (Update 1 → ...)",
+            value=False,  # default = terbaru → lama
+        )
+    with col_t2:
+        hide_no_update_cards = st.checkbox(
+            "Sembunyikan kartu yang belum ada update",
+            value=False,
+        )
+
     # kalau checkbox OFF → latest_first=True → besar → kecil
     timeline_latest_first = not timeline_oldest_first
 
@@ -567,6 +574,11 @@ def main():
                 if val:
                     timeline_items.append(f"**{col}** – {val}")
 
+        has_updates = bool(timeline_items)
+        # kalau diminta sembunyikan kartu tanpa update & memang tidak ada update → skip
+        if hide_no_update_cards and not has_updates:
+            continue
+
         with st.container():
             st.markdown("---")
             c1, c2 = st.columns([3, 1.1])
@@ -582,7 +594,7 @@ def main():
                 if dukungan:
                     st.markdown(f"**Dukungan dari jaringan:** {dukungan}")
 
-                if timeline_items:
+                if has_updates:
                     if timeline_latest_first:
                         st.markdown("**🕒 Timeline Update (terbaru → lama):**")
                     else:
@@ -590,7 +602,9 @@ def main():
                     for item in timeline_items:
                         st.markdown(f"- {item}")
                 else:
-                    st.markdown("_Belum ada update tertulis._")
+                    # hanya tampil kalau TIDAK disembunyikan
+                    if not hide_no_update_cards:
+                        st.markdown("_Belum ada update tertulis._")
 
             with c2:
                 st.markdown("**PIC Lapangan**")
