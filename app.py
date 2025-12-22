@@ -175,45 +175,59 @@ def normalize_phone(phone):
     return digits
 
 
-def get_update_columns(df: pd.DataFrame):
-    return [c for c in df.columns if str(c).strip().startswith("Update")]
+def get_ordered_update_columns(df: pd.DataFrame, latest_first: bool = True):
+    """
+    Ambil semua kolom yang namanya mulai dengan 'Update'
+    dan urutkan berdasarkan angka di namanya.
+    Contoh: Update 1..Update 20 -> kalau latest_first=True: 20..1
+    """
+    found = []
+    for col in df.columns:
+        name = str(col).strip()
+        if not name.lower().startswith("update"):
+            continue
+        nums = re.findall(r"(\d+)", name)
+        if not nums:
+            continue
+        # ambil angka TERAKHIR di nama, biasanya nomor update
+        n = int(nums[-1])
+        found.append((n, col))
+
+    # kalau tidak ada kolom Update, return []
+    if not found:
+        return []
+
+    found.sort(key=lambda x: x[0], reverse=latest_first)
+    return [col for _, col in found]
 
 
-def compute_last_update(row: pd.Series, update_cols):
-    for col in reversed(update_cols):
+def compute_last_update(row: pd.Series, update_cols_desc):
+    """
+    Ambil isi update paling baru (kolom nomor terbesar) yang terisi.
+    update_cols_desc sudah diurutkan dari terbesar → terkecil.
+    """
+    for col in update_cols_desc:
         val = row.get(col, None)
         if pd.notna(val) and str(val).strip():
             return f"{col}: {val}"
     return ""
 
 
-def compute_update_level(row: pd.Series, update_cols):
+def compute_update_level(row: pd.Series, update_cols_all):
     """Level update tertinggi (misal punya Update 1..5 → 5)."""
     max_n = 0
-    for col in update_cols:
+    for col in update_cols_all:
         val = row.get(col, None)
         if pd.notna(val) and str(val).strip():
-            m = re.search(r"(\d+)", str(col))
-            if m:
-                n = int(m.group(1))
+            nums = re.findall(r"(\d+)", str(col))
+            if nums:
+                n = int(nums[-1])
                 if n > max_n:
                     max_n = n
     return max_n
 
 
-def order_update_cols(update_cols, latest_first=True):
-    """Urutkan nama kolom Update berdasarkan angka; latest_first=True → angka terbesar dulu."""
-    def key(col):
-        m = re.search(r"(\d+)", str(col))
-        return int(m.group(1)) if m else 0
-
-    cols_sorted = sorted(update_cols, key=key)  # dari kecil ke besar
-    if latest_first:
-        cols_sorted = list(reversed(cols_sorted))
-    return cols_sorted
-
-
-def build_whatsapp_body_for_row(row: pd.Series, update_cols, wa_korlap_col):
+def build_whatsapp_body_for_row(row: pd.Series, update_cols_desc, wa_korlap_col):
     """Pesan WA format rapi untuk satu lokasi (dipakai di gabungan)."""
     prov = clean_optional(row.get("Provinsi", ""))
     kab = clean_optional(row.get("Kabupaten", ""))
@@ -239,17 +253,15 @@ def build_whatsapp_body_for_row(row: pd.Series, update_cols, wa_korlap_col):
         "",
     ]
 
-    # timeline update (selalu pakai urutan terbaru -> lama di WA)
+    # timeline update (di WA selalu terbaru → lama)
     has_update = False
-    if update_cols:
-        cols_for_timeline = order_update_cols(update_cols, latest_first=True)
-        for col in cols_for_timeline:
-            val = clean_optional(row.get(col, ""))
-            if val:
-                if not has_update:
-                    parts.append("*🕒 Timeline Update*")
-                    has_update = True
-                parts.append(f"- *{col}*: {val}")
+    for col in update_cols_desc:
+        val = clean_optional(row.get(col, ""))
+        if val:
+            if not has_update:
+                parts.append("*🕒 Timeline Update*")
+                has_update = True
+            parts.append(f"- *{col}*: {val}")
     if not has_update:
         parts.append("_Belum ada update tertulis._")
 
@@ -283,10 +295,17 @@ def main():
         st.warning("Belum ada data di Google Sheet.")
         st.stop()
 
-    update_cols = get_update_columns(df)
-    if update_cols:
-        df["Last Update (full)"] = df.apply(lambda r: compute_last_update(r, update_cols), axis=1)
-        df["Update_Level"] = df.apply(lambda r: compute_update_level(r, update_cols), axis=1)
+    # --- update columns, dengan urutan numeric ---
+    update_cols_desc = get_ordered_update_columns(df, latest_first=True)   # besar → kecil
+    update_cols_asc = list(reversed(update_cols_desc))                    # kecil → besar
+
+    if update_cols_desc:
+        df["Last Update (full)"] = df.apply(
+            lambda r: compute_last_update(r, update_cols_desc), axis=1
+        )
+        df["Update_Level"] = df.apply(
+            lambda r: compute_update_level(r, update_cols_desc), axis=1
+        )
     else:
         df["Last Update (full)"] = ""
         df["Update_Level"] = 0
@@ -357,14 +376,10 @@ def main():
                 if dukungan:
                     st.markdown(f"**Dukungan dari jaringan:** {dukungan}")
 
-                if update_cols:
-                    st.markdown("**🕒 Timeline Update:**")
+                if update_cols_desc:
+                    st.markdown("**🕒 Timeline Update (terbaru → lama):**")
                     has_update = False
-                    # gunakan urutan global; default terbaru → lama
-                    # (checkbox timeline ada di bawah, tapi untuk detail
-                    #  kita tetap pakai terbaru → lama agar konsisten dan singkat)
-                    cols_for_timeline = order_update_cols(update_cols, latest_first=True)
-                    for col in cols_for_timeline:
+                    for col in update_cols_desc:
                         val = clean_optional(row.get(col, ""))
                         if val:
                             has_update = True
@@ -492,12 +507,13 @@ def main():
         # Kembali ke urutan input asli
         filtered = filtered.sort_values("__row_index", ascending=True)
 
-    # === TIMELINE ORDER TOGGLE ===
-    st.markdown("### 🕒 Pengaturan Timeline")
+    # === TIMELINE ORDER TOGGLE (UNTUK CARD) ===
+    st.markdown("### 🕒 Pengaturan Timeline (Card)")
     timeline_oldest_first = st.checkbox(
-        "Timeline: tampilkan dari update paling lama dulu",
+        "Timeline di kartu: tampilkan dari update paling lama dulu (Update 1 → ...)",
         value=False,  # default = terbaru → lama
     )
+    # kalau checkbox OFF → latest_first=True → besar → kecil
     timeline_latest_first = not timeline_oldest_first
 
     st.markdown(
@@ -542,10 +558,10 @@ def main():
         wa_pusat_raw = row.get(wa_pusat_col, "") if wa_pusat_col else ""
         wa_pusat_pretty = clean_optional(wa_pusat_raw)
 
-        # timeline update (ikut pengaturan global)
+        # timeline update untuk CARD (ikut toggle)
         timeline_items = []
-        if update_cols:
-            cols_for_timeline = order_update_cols(update_cols, latest_first=timeline_latest_first)
+        if update_cols_desc:
+            cols_for_timeline = update_cols_desc if timeline_latest_first else update_cols_asc
             for col in cols_for_timeline:
                 val = clean_optional(row.get(col, ""))
                 if val:
@@ -567,7 +583,10 @@ def main():
                     st.markdown(f"**Dukungan dari jaringan:** {dukungan}")
 
                 if timeline_items:
-                    st.markdown("**🕒 Timeline Update:**")
+                    if timeline_latest_first:
+                        st.markdown("**🕒 Timeline Update (terbaru → lama):**")
+                    else:
+                        st.markdown("**🕒 Timeline Update (lama → terbaru):**")
                     for item in timeline_items:
                         st.markdown(f"- {item}")
                 else:
@@ -651,7 +670,7 @@ def main():
 
         bodies = []
         for i, row in enumerate(selected_rows, start=1):
-            body = build_whatsapp_body_for_row(row, update_cols, wa_korlap_col)
+            body = build_whatsapp_body_for_row(row, update_cols_desc, wa_korlap_col)
             prov = clean_optional(row.get("Provinsi", ""))
             kab = clean_optional(row.get("Kabupaten", ""))
             header = f"*Lokasi {i} – {prov or '-'} / {kab or '-'}*"
